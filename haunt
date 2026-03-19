@@ -108,9 +108,23 @@ if [[ "${1:-}" == "--list" ]]; then
         return output
     end tell')
 
-    # Build tab data for decorators: tabId \t termName
+    # Build tab data for decorators: tabId \t termName \t focused
+    # AXMain = the window with keyboard focus (not just frontmost/floating)
     indicatorfile="${HAUNT_INDICATORFILE:-${TMPDIR:-/tmp}haunt-indicators}"
-    tab_data=$(echo "$raw" | awk -F$'\x1f' 'NF >= 6 { print $2 "\t" $6 }')
+    focused_win_name=$(osascript -e '
+    tell application "System Events"
+        tell process "Ghostty"
+            repeat with w in every window
+                try
+                    if value of attribute "AXMain" of w then return name of w
+                end try
+            end repeat
+        end tell
+    end tell' 2>/dev/null || echo "")
+    tab_data=$(echo "$raw" | awk -F$'\x1f' -v fwn="$focused_win_name" 'NF >= 6 {
+        focused = ($4 == "true" && $3 == fwn) ? "true" : "false"
+        print $2 "\t" $6 "\t" focused
+    }')
     run_decorators "$tab_data" "$indicatorfile"
 
     echo "$raw" | awk -F$'\x1f' '

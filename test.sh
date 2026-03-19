@@ -63,23 +63,29 @@ echo "Claude status hook:"
 decorate="$(dirname "$HAUNT")/hooks/claude-status/decorate"
 
 # Working state
-result=$(printf 'tab-001\t⠐ Claude Code\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-001\t⠐ Claude Code\tfalse\n' | "$decorate" 2>/dev/null)
 assert "detects working state" "echo '$result' | grep -q 'tab-001'"
 
 # Idle state (no previous = no attention)
 rm -f "${TMPDIR:-/tmp}haunt-claude-states" "${TMPDIR:-/tmp}haunt-claude-attention"
-result=$(printf 'tab-002\t✳ Claude Code\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-002\t✳ Claude Code\tfalse\n' | "$decorate" 2>/dev/null)
 assert "idle with no previous state = no indicator" "[[ -z '$result' ]]"
 
-# Working→idle transition
+# Working→idle transition (background tab)
 printf 'tab-003\tworking\n' > "${TMPDIR:-/tmp}haunt-claude-states"
 : > "${TMPDIR:-/tmp}haunt-claude-attention"
-result=$(printf 'tab-003\t✳ Claude Code\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-003\t✳ Claude Code\tfalse\n' | "$decorate" 2>/dev/null)
 assert "working→idle transition triggers attention" "echo '$result' | grep -q 'tab-003'"
+
+# Working→idle transition (focused tab = no attention)
+printf 'tab-005\tworking\n' > "${TMPDIR:-/tmp}haunt-claude-states"
+: > "${TMPDIR:-/tmp}haunt-claude-attention"
+result=$(printf 'tab-005\t✳ Claude Code\ttrue\n' | "$decorate" 2>/dev/null)
+assert "working→idle on focused tab = no attention" "[[ -z \"\$result\" ]]"
 
 # Non-Claude tab ignored
 rm -f "${TMPDIR:-/tmp}haunt-claude-states" "${TMPDIR:-/tmp}haunt-claude-attention"
-result=$(printf 'tab-004\t~/my-project\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-004\t~/my-project\tfalse\n' | "$decorate" 2>/dev/null)
 assert "non-Claude tab produces no indicator" "[[ -z '$result' ]]"
 
 # Cleanup

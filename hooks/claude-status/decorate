@@ -2,11 +2,11 @@
 # haunt hook: Claude Code status indicators
 # Detects working/idle state from terminal name and tracks transitions.
 #
-# Input (stdin):  tabId \t termName  (one per line)
+# Input (stdin):  tabId \t termName \t selected  (one per line)
 # Output (stdout): tabId \t indicator  (only for tabs that need one)
 #
 # ⏳ = Claude is working
-# ⚡ = Claude just finished (needs input) — cleared on focus
+# ⚡ = Claude just finished (needs input) — cleared when tab is viewed
 
 set -euo pipefail
 
@@ -33,7 +33,7 @@ BEGIN {
 }
 
 {
-    tabId = $1; termName = $2
+    tabId = $1; termName = $2; focused = $3
     isWorking = 0; isIdle = 0
 
     if (index(termName, "Claude Code") > 0) {
@@ -43,8 +43,12 @@ BEGIN {
             isWorking = 1
     } else next
 
+    # Track state transitions — always flash on working→idle
     if (prev[tabId] == "working" && isIdle) attn[tabId] = 1
     if (isWorking) delete attn[tabId]
+
+    # Clear attention if user is currently viewing this tab
+    if (focused == "true") delete attn[tabId]
 
     cur[tabId] = isWorking ? "working" : "idle"
 
