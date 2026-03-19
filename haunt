@@ -23,7 +23,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 SELF="$(realpath "$0")"
 REFRESH_INTERVAL=2
 LOCKFILE="${TMPDIR:-/tmp}haunt.lock"
@@ -275,6 +275,7 @@ if [[ "${1:-}" == "--summon" || "${1:-}" == "summon" ]]; then
         IFS=$'\t' read -r win_id tab_id < "$LOCKFILE" || true
         osascript -e "
         tell application \"Ghostty\"
+            activate
             set w to (first window whose id is \"${win_id}\")
             set t to (first tab of w whose id is \"${tab_id}\")
             select tab t
