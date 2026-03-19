@@ -40,6 +40,12 @@ curl -fsSL https://raw.githubusercontent.com/janpaepke/haunt/main/haunt -o ~/.lo
 chmod +x ~/.local/bin/haunt
 ```
 
+## Uninstall
+
+```bash
+rm ~/.local/bin/haunt
+```
+
 ## Usage
 
 ```bash
