@@ -16,8 +16,20 @@ fi
 
 # Check fzf
 if ! command -v fzf &>/dev/null; then
-    echo "Error: fzf is required. Install it first: brew install fzf" >&2
-    exit 1
+    if command -v brew &>/dev/null; then
+        read -rp "fzf is required but not installed. Install via Homebrew? [Y/n] " answer
+        if [[ "${answer:-Y}" =~ ^[Yy]$ ]]; then
+            brew install fzf
+        else
+            echo "Aborted. Install fzf manually and re-run." >&2
+            exit 1
+        fi
+    else
+        echo "Error: fzf is required but not installed." >&2
+        echo "Install it via Homebrew (https://brew.sh): brew install fzf" >&2
+        echo "Or see https://github.com/junegunn/fzf#installation" >&2
+        exit 1
+    fi
 fi
 
 # Create install directory

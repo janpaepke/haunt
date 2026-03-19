@@ -6,6 +6,12 @@ A tab switcher and session dashboard for [Ghostty](https://ghostty.org).
 
 haunt shows an interactive, auto-refreshing list of all your Ghostty tabs — across all windows and macOS Spaces. Tabs are grouped by project directory, with active tabs highlighted. Select a tab to switch to it instantly, even across Spaces.
 
+## Why
+
+If you work on multiple projects — each in its own Ghostty window, maybe on different macOS Spaces — you know the pain: you lose track. Which tab was running your dev server? Where was that Claude Code session? Cmd-tabbing through Spaces is slow and disorienting.
+
+haunt gives you a single, persistent overview of everything that's open, and lets you jump there instantly.
+
 ## Features
 
 - **Cross-Space switching** — jump to any tab in any window on any Space
@@ -71,6 +77,14 @@ alt - t : haunt --summon
 ## How it works
 
 haunt queries Ghostty's AppleScript API to enumerate all windows and tabs with their titles, selection state, and working directories. It presents them in an [fzf](https://github.com/junegunn/fzf) interface that auto-refreshes via fzf's HTTP listener. Selecting a tab uses Ghostty's `select tab` and `activate window` AppleScript commands, which trigger a macOS Space switch when needed.
+
+## Current limitations
+
+- **macOS only** — haunt relies on Ghostty's AppleScript API, which is macOS-specific. Linux/Windows support would require Ghostty's D-Bus or native IPC (not yet available).
+- **Ghostty only** — the AppleScript interface is specific to Ghostty. Supporting other terminals (iTerm2, WezTerm, etc.) would need separate backends.
+- **No session persistence** — haunt shows live tabs but doesn't save/restore sessions across Ghostty restarts.
+
+PRs welcome — see the issues for planned work.
 
 ## License
 
