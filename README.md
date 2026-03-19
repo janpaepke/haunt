@@ -1,0 +1,77 @@
+# 👻 haunt
+
+A tab switcher and session dashboard for [Ghostty](https://ghostty.org).
+
+![haunt screenshot](screenshot.png)
+
+haunt shows an interactive, auto-refreshing list of all your Ghostty tabs — across all windows and macOS Spaces. Tabs are grouped by project directory, with active tabs highlighted. Select a tab to switch to it instantly, even across Spaces.
+
+## Features
+
+- **Cross-Space switching** — jump to any tab in any window on any Space
+- **Grouped by project** — tabs are organized by their common working directory
+- **Active tab indicators** — see which tabs are selected at a glance
+- **Auto-refresh** — the list updates every 2 seconds
+- **Stays open** — switch between tabs without relaunching
+- **Summon mode** — bring haunt to focus from a hotkey
+
+## Requirements
+
+- **macOS** (uses Ghostty's native AppleScript API)
+- **Ghostty** 1.3.0+
+- **fzf** 0.48+ (`brew install fzf`)
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/janpaepke/haunt/main/install.sh | bash
+```
+
+Or manually:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/janpaepke/haunt/main/haunt -o ~/.local/bin/haunt
+chmod +x ~/.local/bin/haunt
+```
+
+## Usage
+
+```bash
+haunt              # Launch the dashboard
+haunt --summon     # Focus an already-running instance
+haunt --version    # Show version
+haunt --help       # Show help
+```
+
+### Global hotkey
+
+For quick access, bind `haunt --summon` to a system-wide keyboard shortcut. Pick whichever method you already use:
+
+**Raycast** (free)
+Create a Script Command that runs `haunt --summon` and assign a hotkey.
+
+**Alfred** (requires Powerpack)
+Create a workflow: Hotkey trigger → Run Script → `haunt --summon`.
+
+**macOS Shortcuts**
+Create a shortcut with a "Run Shell Script" action (`haunt --summon`), then assign a keyboard shortcut in System Settings → Keyboard → Keyboard Shortcuts → App Shortcuts.
+
+**Hammerspoon** (free, Lua-based)
+```lua
+hs.hotkey.bind({"alt"}, "t", function()
+  os.execute("haunt --summon")
+end)
+```
+
+**skhd** (free, lightweight)
+```
+alt - t : haunt --summon
+```
+
+## How it works
+
+haunt queries Ghostty's AppleScript API to enumerate all windows and tabs with their titles, selection state, and working directories. It presents them in an [fzf](https://github.com/junegunn/fzf) interface that auto-refreshes via fzf's HTTP listener. Selecting a tab uses Ghostty's `select tab` and `activate window` AppleScript commands, which trigger a macOS Space switch when needed.
+
+## License
+
+MIT

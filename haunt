@@ -1,17 +1,48 @@
 #!/usr/bin/env bash
+#
 # haunt — A tab switcher and session dashboard for Ghostty
 #
-# Uses Ghostty's native AppleScript API (works across all macOS Spaces).
-# Auto-refreshes tab list every 2 seconds.
-# Requires: macOS, Ghostty, fzf >= 0.48
+# Displays an interactive, auto-refreshing list of all Ghostty tabs across
+# all windows and macOS Spaces. Tabs are grouped by window (labeled with
+# the common ancestor directory), with active tabs shown first.
+#
+# Selecting a tab switches to it, including cross-Space navigation.
+# The list stays open for repeated switching — press Escape to quit.
+#
+# Requirements:
+#   - macOS (uses Ghostty's AppleScript API)
+#   - Ghostty (https://ghostty.org)
+#   - fzf >= 0.48 (https://github.com/junegunn/fzf)
+#
+# Usage:
+#   haunt              Launch the interactive tab dashboard
+#   haunt --summon     Focus an already-running haunt instance
+#   haunt --help       Show this help
+#   haunt --version    Show version
+#
+
 set -euo pipefail
 
+VERSION="0.1.0"
 SELF="$(realpath "$0")"
 REFRESH_INTERVAL=2
+LOCKFILE="${TMPDIR:-/tmp}haunt.lock"
 
-# --- Sub-command: fetch tab list for fzf ---
+# ─── Help & version ──────────────────────────────────────────────────────────
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+    sed -n '3,/^$/s/^# \{0,1\}//p' "$SELF"
+    exit 0
+fi
+
+if [[ "${1:-}" == "--version" || "${1:-}" == "-v" || "${1:-}" == "version" ]]; then
+    echo "haunt ${VERSION}"
+    exit 0
+fi
+
+# ─── Internal: fetch tab list (called by fzf reload) ─────────────────────────
+
 if [[ "${1:-}" == "--list" ]]; then
-    # Get raw data: winId \t tabId \t tabName \t selected \t workingDir
     raw=$(osascript -e '
     tell application "Ghostty"
         set sep to ASCII character 31
@@ -31,19 +62,13 @@ if [[ "${1:-}" == "--list" ]]; then
         return output
     end tell')
 
-    # Process: group by working directory ancestor, sort groups alphabetically, active tabs first
     echo "$raw" | awk -F$'\x1f' '
     NF >= 5 {
-        winId = $1
-        tabId = $2
-        tabName = $3
-        selected = $4
-        wd = $5
+        winId = $1; tabId = $2; tabName = $3; selected = $4; wd = $5
 
-        # Skip our own tab
+        # Skip the tab running haunt itself
         if (tabId == ENVIRON["HAUNT_SELF"]) next
 
-        # Store tab data globally
         totalTabs++
         tab[totalTabs, "winId"] = winId
         tab[totalTabs, "tabId"] = tabId
@@ -51,7 +76,7 @@ if [[ "${1:-}" == "--list" ]]; then
         tab[totalTabs, "selected"] = selected
         tab[totalTabs, "wd"] = wd
 
-        # Track which window this tab belongs to (for per-window ancestor calc)
+        # Collect working dirs per window for common ancestor calculation
         if (!(winId in winDirs)) {
             winDirs[winId] = wd
         } else {
@@ -59,6 +84,7 @@ if [[ "${1:-}" == "--list" ]]; then
         }
     }
 
+    # Find the longest shared path prefix across pipe-separated paths
     function commonAncestor(paths,    arr, n, i, refN, refParts, curParts, common, j, m, ref) {
         n = split(paths, arr, "|")
         if (n == 0) return ""
@@ -69,10 +95,7 @@ if [[ "${1:-}" == "--list" ]]; then
             m = split(arr[i], curParts, "/")
             if (m < common) common = m
             for (j = 1; j <= common; j++) {
-                if (refParts[j] != curParts[j]) {
-                    common = j - 1
-                    break
-                }
+                if (refParts[j] != curParts[j]) { common = j - 1; break }
             }
         }
         ref = ""
@@ -83,12 +106,10 @@ if [[ "${1:-}" == "--list" ]]; then
         return ref
     }
 
+    # Strip $HOME prefix for display
     function shortPath(p,    home) {
         home = ENVIRON["HOME"]
-        if (index(p, home) == 1) {
-            p = substr(p, length(home) + 1)
-        }
-        sub(/^\/dev\//, "", p)
+        if (index(p, home) == 1) p = substr(p, length(home) + 1)
         sub(/^\//, "", p)
         return p
     }
@@ -96,7 +117,7 @@ if [[ "${1:-}" == "--list" ]]; then
     END {
         sep = sprintf("%c", 31)
 
-        # Compute label per window and build window list (preserving order)
+        # Compute display label per window
         for (i = 1; i <= totalTabs; i++) {
             wId = tab[i, "winId"]
             if (!(wId in winSeen)) {
@@ -108,38 +129,29 @@ if [[ "${1:-}" == "--list" ]]; then
             }
         }
 
-        # Sort windows alphabetically by label, then by winId for stable tiebreak
+        # Sort windows alphabetically by label (stable tiebreak on id)
         for (i = 2; i <= winCount; i++) {
-            key = winList[i]
-            keyLabel = winLabel[key]
-            j = i - 1
+            key = winList[i]; keyLabel = winLabel[key]; j = i - 1
             while (j > 0 && (winLabel[winList[j]] > keyLabel || (winLabel[winList[j]] == keyLabel && winList[j] > key))) {
-                winList[j + 1] = winList[j]
-                j--
+                winList[j + 1] = winList[j]; j--
             }
             winList[j + 1] = key
         }
 
-        # Print each window group
+        # Output each window group
         for (w = 1; w <= winCount; w++) {
             wId = winList[w]
-
-            # Print group header (muted gray)
             printf "\033[38;5;245m\xf0\x9f\x96\xa5  %s\033[0m%s_header_%s_header_\n", winLabel[wId], sep, sep
-
-            # Active tabs first, then inactive
             for (pass = 1; pass <= 2; pass++) {
                 for (i = 1; i <= totalTabs; i++) {
                     if (tab[i, "winId"] != wId) continue
                     isActive = (tab[i, "selected"] == "true")
                     if (pass == 1 && !isActive) continue
                     if (pass == 2 && isActive) continue
-
-                    if (isActive) {
+                    if (isActive)
                         printf "   \xe2\x96\xb8 %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
-                    } else {
+                    else
                         printf "     %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
-                    }
                 }
             }
         }
@@ -147,32 +159,22 @@ if [[ "${1:-}" == "--list" ]]; then
     exit 0
 fi
 
-# --- Sub-command: focus a tab ---
+# ─── Internal: focus a tab (called by fzf on selection) ──────────────────────
+
 if [[ "${1:-}" == "--focus" ]]; then
-    win_id="$2"
-    tab_id="$3"
     osascript -e "
     tell application \"Ghostty\"
-        set w to (first window whose id is \"${win_id}\")
-        set t to (first tab of w whose id is \"${tab_id}\")
+        set w to (first window whose id is \"${2}\")
+        set t to (first tab of w whose id is \"${3}\")
         select tab t
         activate window w
     end tell"
     exit 0
 fi
 
-# --- Background refresher ---
-start_refresher() {
-    local port="$1"
-    while true; do
-        sleep "$REFRESH_INTERVAL"
-        curl -s -XPOST "localhost:${port}" -d "reload($SELF --list)" >/dev/null 2>&1 || break
-    done
-}
+# ─── Summon: focus an already-running haunt instance ──────────────────────────
 
-# --- Sub-command: bring to front ---
-LOCKFILE="/tmp/haunt.lock"
-if [[ "${1:-}" == "--summon" ]]; then
+if [[ "${1:-}" == "--summon" || "${1:-}" == "summon" ]]; then
     if [[ -f "$LOCKFILE" ]]; then
         IFS=$'\t' read -r win_id tab_id < "$LOCKFILE" || true
         osascript -e "
@@ -186,7 +188,24 @@ if [[ "${1:-}" == "--summon" ]]; then
     exit 0
 fi
 
-# --- Detect own window/tab ID at launch ---
+# ─── Dependency checks ───────────────────────────────────────────────────────
+
+if [[ "$(uname)" != "Darwin" ]]; then
+    echo "haunt: macOS is required (uses Ghostty's AppleScript API)" >&2
+    exit 1
+fi
+if ! command -v fzf &>/dev/null; then
+    echo "haunt: fzf is required but not found (brew install fzf)" >&2
+    exit 1
+fi
+if ! pgrep -q Ghostty; then
+    echo "haunt: Ghostty must be running" >&2
+    exit 1
+fi
+
+# ─── Launch ───────────────────────────────────────────────────────────────────
+
+# Detect own tab so we can exclude it from the list
 export HAUNT_SELF
 read -r own_win_id own_tab_id <<< "$(osascript -e '
 tell application "Ghostty"
@@ -195,18 +214,21 @@ tell application "Ghostty"
 end tell' 2>/dev/null || echo "")"
 HAUNT_SELF="$own_tab_id"
 
-# Write lockfile for --summon
+# Write lockfile so --summon can find us
 printf '%s\t%s' "$own_win_id" "$own_tab_id" > "$LOCKFILE"
 
-# --- Main ---
-
+# Background process that triggers fzf reload every REFRESH_INTERVAL seconds
 port=$((10000 + RANDOM % 50000))
-
-start_refresher "$port" &
+(
+    while true; do
+        sleep "$REFRESH_INTERVAL"
+        curl -s -XPOST "localhost:${port}" -d "reload($SELF --list)" >/dev/null 2>&1 || break
+    done
+) &
 refresher_pid=$!
 trap "rm -f '$LOCKFILE'; kill $refresher_pid 2>/dev/null" EXIT
 
-# Single fzf instance: Enter executes focus + reload in-place (no flicker)
+# Launch fzf — stays open for repeated selection, Escape to quit
 "$SELF" --list | fzf \
     --ansi \
     --no-sort \
