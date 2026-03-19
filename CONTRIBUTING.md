@@ -28,7 +28,7 @@ Hooks are the extension mechanism for haunt. Each hook is a directory under `hoo
 
 | Hook | When | Input | Purpose |
 |------|------|-------|---------|
-| `decorate` | Each refresh | `tabId\ttermName` on stdin | Output `tabId\tindicator` lines to add indicators |
+| `decorate` | Each refresh | `tabId\ttermName\tfocused` on stdin | Output `tabId\tindicator` lines to add indicators |
 | `on-focus` | Tab selected | `<tab_id>` as arg | React to tab focus (e.g. clear notifications) |
 | `on-start` | haunt launches | (none) | Initialize state |
 | `on-stop` | haunt exits | (none) | Clean up state |

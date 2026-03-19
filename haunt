@@ -70,8 +70,8 @@ run_hooks() {
 }
 
 # Collect decorator output from all enabled hooks into a single indicators file.
-# Each decorator receives tab data on stdin (tsv: tabId \t termName)
-# and outputs lines of: tabId \t indicator
+# Each decorator receives tab data on stdin (tsv: tabId \t termName \t focused)
+# and outputs lines of: tabId \t indicator (with ANSI color codes)
 run_decorators() {
     local tab_data="$1"
     local outfile="$2"
@@ -109,8 +109,15 @@ if [[ "${1:-}" == "--list" ]]; then
     end tell')
 
     # Build tab data for decorators: tabId \t termName \t focused
-    # AXMain = the window with keyboard focus (not just frontmost/floating)
+    # "focused" = the tab the user is actually viewing right now.
+    # Uses System Events AXMain attribute to find the keyboard-focused window
+    # (Ghostty's own "front window" is unreliable — it reflects the last
+    # AppleScript-activated window, not the user's actual focus).
     indicatorfile="${HAUNT_INDICATORFILE:-${TMPDIR:-/tmp}haunt-indicators}"
+    # Find which tab the user is actually viewing via AXMain (keyboard-focused window).
+    # If haunt's own tab is AXMain, the user is in the dashboard — skip focus detection.
+    # AXMain is reliable even with floating windows (unlike Ghostty's "front window").
+    haunt_tab_name=$(echo "$raw" | awk -F$'\x1f' -v self="$HAUNT_SELF" '$2 == self { print $3; exit }')
     focused_win_name=$(osascript -e '
     tell application "System Events"
         tell process "Ghostty"
@@ -121,15 +128,24 @@ if [[ "${1:-}" == "--list" ]]; then
             end repeat
         end tell
     end tell' 2>/dev/null || echo "")
+    # If the focused window is haunt itself, don't match anything
+    if [[ "$focused_win_name" == "$haunt_tab_name" ]]; then
+        focused_win_name=""
+    fi
+    # Match: a tab is "focused" if it is selected AND its name matches the
+    # AXMain window. Name collisions across windows are possible but rare for
+    # user-named tabs; Claude's default names (✳ Claude Code) are all idle anyway.
     tab_data=$(echo "$raw" | awk -F$'\x1f' -v fwn="$focused_win_name" 'NF >= 6 {
-        focused = ($4 == "true" && $3 == fwn) ? "true" : "false"
+        focused = (fwn != "" && $4 == "true" && $3 == fwn) ? "true" : "false"
         print $2 "\t" $6 "\t" focused
     }')
     run_decorators "$tab_data" "$indicatorfile"
 
+    # Format tab data for fzf. Output fields (separated by \x1f):
+    #   1: display text (visible)  2: winId (hidden)  3: tabId (hidden)
+    # Indicators from hooks are prepended to the display text.
     echo "$raw" | awk -F$'\x1f' '
     BEGIN {
-        # Load indicators from decorator hooks
         ifile = ENVIRON["HAUNT_INDICATORFILE"]
         while ((getline line < ifile) > 0) {
             split(line, parts, "\t")
@@ -188,10 +204,11 @@ if [[ "${1:-}" == "--list" ]]; then
     }
 
     END {
-        sep = sprintf("%c", 31)
+        sep = sprintf("%c", 31)  # \x1f — fzf field delimiter
         dim = "\033[38;5;245m"
         reset = "\033[0m"
 
+        # Group tabs by window, labeled with their common ancestor directory
         for (i = 1; i <= totalTabs; i++) {
             wId = tab[i, "winId"]
             if (!(wId in winSeen)) {
@@ -203,6 +220,7 @@ if [[ "${1:-}" == "--list" ]]; then
             }
         }
 
+        # Sort windows alphabetically by label (insertion sort)
         for (i = 2; i <= winCount; i++) {
             key = winList[i]; keyLabel = winLabel[key]; j = i - 1
             while (j > 0 && (winLabel[winList[j]] > keyLabel || (winLabel[winList[j]] == keyLabel && winList[j] > key))) {
