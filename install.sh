@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# haunt installer — downloads haunt to ~/.local/bin
+# haunt installer — downloads haunt to ~/.local/share/haunt and symlinks the binary
 set -euo pipefail
 
 REPO="janpaepke/haunt"
-INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_DIR="${HOME}/.local/share/haunt"
+BIN_DIR="${HOME}/.local/bin"
 BIN_NAME="haunt"
 
 echo "👻 Installing haunt..."
@@ -32,25 +33,40 @@ if ! command -v fzf &>/dev/null; then
     fi
 fi
 
-# Create install directory
-mkdir -p "$INSTALL_DIR"
-
-# If run from within the repo, symlink instead of downloading
+# If run from within the repo, symlink directly
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [[ -f "${SCRIPT_DIR}/haunt" ]]; then
-    ln -sf "${SCRIPT_DIR}/haunt" "${INSTALL_DIR}/${BIN_NAME}"
-    echo "👻 Linked ${INSTALL_DIR}/${BIN_NAME} → ${SCRIPT_DIR}/haunt"
+if [[ -f "${SCRIPT_DIR}/haunt" && -d "${SCRIPT_DIR}/hooks" ]]; then
+    mkdir -p "$BIN_DIR"
+    ln -sf "${SCRIPT_DIR}/haunt" "${BIN_DIR}/${BIN_NAME}"
+    echo "👻 Linked ${BIN_DIR}/${BIN_NAME} → ${SCRIPT_DIR}/haunt (dev mode)"
 else
-    curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/haunt" -o "${INSTALL_DIR}/${BIN_NAME}"
-    chmod +x "${INSTALL_DIR}/${BIN_NAME}"
-    echo "👻 Installed to ${INSTALL_DIR}/${BIN_NAME}"
+    # Fetch latest release tag
+    latest=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*: "//;s/".*//')
+    if [[ -z "$latest" ]]; then
+        echo "Error: could not determine latest release." >&2
+        exit 1
+    fi
+    echo "Downloading ${latest}..."
+
+    # Clean previous install
+    rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+
+    # Download and extract release tarball
+    curl -fsSL "https://github.com/${REPO}/archive/refs/tags/${latest}.tar.gz" \
+        | tar xz -C "$INSTALL_DIR" --strip-components=1
+
+    # Symlink binary
+    mkdir -p "$BIN_DIR"
+    ln -sf "${INSTALL_DIR}/haunt" "${BIN_DIR}/${BIN_NAME}"
+    echo "👻 Installed haunt ${latest} to ${INSTALL_DIR}"
 fi
 
 # Check PATH
-if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
+if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
     echo ""
-    echo "Warning: ${INSTALL_DIR} is not in your \$PATH."
+    echo "Warning: ${BIN_DIR} is not in your \$PATH."
     echo "Add this to your shell config (~/.zshrc):"
     echo ""
-    echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+    echo "  export PATH=\"${BIN_DIR}:\$PATH\""
 fi

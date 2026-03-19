@@ -33,17 +33,14 @@ haunt gives you a single, persistent overview of everything that's open, and let
 curl -fsSL https://raw.githubusercontent.com/janpaepke/haunt/main/install.sh | bash
 ```
 
-Or manually:
+This downloads haunt to `~/.local/share/haunt/` and symlinks the binary to `~/.local/bin/haunt`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/janpaepke/haunt/main/haunt -o ~/.local/bin/haunt
-chmod +x ~/.local/bin/haunt
-```
+To update, just re-run the same command.
 
 ## Uninstall
 
 ```bash
-rm ~/.local/bin/haunt
+rm -rf ~/.local/share/haunt ~/.local/bin/haunt
 ```
 
 ## Usage
