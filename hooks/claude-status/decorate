@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# haunt hook: Claude Code status indicators
+# Detects working/idle state from terminal name and tracks transitions.
+#
+# Input (stdin):  tabId \t termName  (one per line)
+# Output (stdout): tabId \t indicator  (only for tabs that need one)
+#
+# ⏳ = Claude is working
+# ⚡ = Claude just finished (needs input) — cleared on focus
+
+set -euo pipefail
+
+STATEFILE="${TMPDIR:-/tmp}haunt-claude-states"
+ATTENTIONFILE="${TMPDIR:-/tmp}haunt-claude-attention"
+
+touch "$STATEFILE" "$ATTENTIONFILE"
+
+awk -F'\t' '
+BEGIN {
+    statefile = "'"$STATEFILE"'"
+    attentionfile = "'"$ATTENTIONFILE"'"
+
+    while ((getline line < statefile) > 0) {
+        split(line, p, "\t")
+        prev[p[1]] = p[2]
+    }
+    close(statefile)
+
+    while ((getline line < attentionfile) > 0) {
+        attn[line] = 1
+    }
+    close(attentionfile)
+}
+
+{
+    tabId = $1; termName = $2
+    isWorking = 0; isIdle = 0
+
+    if (index(termName, "Claude Code") > 0) {
+        if (index(termName, "\xe2\x9c\xb3") == 1)
+            isIdle = 1
+        else
+            isWorking = 1
+    } else next
+
+    if (prev[tabId] == "working" && isIdle) attn[tabId] = 1
+    if (isWorking) delete attn[tabId]
+
+    cur[tabId] = isWorking ? "working" : "idle"
+
+    dim = "\033[38;5;245m"
+    yellow = "\033[33m"
+    reset = "\033[0m"
+
+    if (tabId in attn)
+        printf "%s\t%s\xe2\x9a\xa1%s\n", tabId, yellow, reset
+    else if (isWorking)
+        printf "%s\t%s\xe2\x8f\xb3%s\n", tabId, dim, reset
+}
+
+END {
+    for (id in cur) printf "%s\t%s\n", id, cur[id] > statefile
+    close(statefile)
+    for (id in attn) print id > attentionfile
+    close(attentionfile)
+}'

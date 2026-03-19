@@ -23,10 +23,26 @@
 
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 SELF="$(realpath "$0")"
 REFRESH_INTERVAL=2
 LOCKFILE="${TMPDIR:-/tmp}haunt.lock"
+SCRIPTDIR="$(cd "$(dirname "$SELF")" && pwd)"
+CONFIGFILE="${XDG_CONFIG_HOME:-$HOME/.config}/haunt/config"
+
+# Default: enable all bundled hooks
+HOOKS=""
+if [[ -d "${SCRIPTDIR}/hooks" ]]; then
+    for d in "${SCRIPTDIR}/hooks"/*/; do
+        [[ -d "$d" ]] && HOOKS="${HOOKS} $(basename "$d")"
+    done
+fi
+
+# User config can override (e.g. HOOKS="" to disable all, or a specific list)
+if [[ -f "$CONFIGFILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONFIGFILE"
+fi
 
 # ─── Help & version ──────────────────────────────────────────────────────────
 
@@ -39,6 +55,34 @@ if [[ "${1:-}" == "--version" || "${1:-}" == "-v" || "${1:-}" == "version" ]]; t
     echo "haunt ${VERSION}"
     exit 0
 fi
+
+# ─── Hooks helper ─────────────────────────────────────────────────────────────
+
+# Run a named hook across all enabled hooks. Extra args are passed through.
+run_hooks() {
+    local hook_name="$1"; shift
+    for name in $HOOKS; do
+        local script="${SCRIPTDIR}/hooks/${name}/${hook_name}"
+        if [[ -x "$script" ]]; then
+            "$script" "$@"
+        fi
+    done
+}
+
+# Collect decorator output from all enabled hooks into a single indicators file.
+# Each decorator receives tab data on stdin (tsv: tabId \t termName)
+# and outputs lines of: tabId \t indicator
+run_decorators() {
+    local tab_data="$1"
+    local outfile="$2"
+    : > "$outfile"
+    for name in $HOOKS; do
+        local script="${SCRIPTDIR}/hooks/${name}/decorate"
+        if [[ -x "$script" ]]; then
+            echo "$tab_data" | "$script" >> "$outfile"
+        fi
+    done
+}
 
 # ─── Internal: fetch tab list (called by fzf reload) ─────────────────────────
 
@@ -55,15 +99,32 @@ if [[ "${1:-}" == "--list" ]]; then
                 set tabId to id of t
                 set tabName to name of t
                 set isSel to selected of t
-                set wd to working directory of focused terminal of t
-                set output to output & winId & sep & tabId & sep & tabName & sep & isSel & sep & wd & linefeed
+                set term to focused terminal of t
+                set wd to working directory of term
+                set termName to name of term
+                set output to output & winId & sep & tabId & sep & tabName & sep & isSel & sep & wd & sep & termName & linefeed
             end repeat
         end repeat
         return output
     end tell')
 
+    # Build tab data for decorators: tabId \t termName
+    indicatorfile="${HAUNT_INDICATORFILE:-${TMPDIR:-/tmp}haunt-indicators}"
+    tab_data=$(echo "$raw" | awk -F$'\x1f' 'NF >= 6 { print $2 "\t" $6 }')
+    run_decorators "$tab_data" "$indicatorfile"
+
     echo "$raw" | awk -F$'\x1f' '
-    NF >= 5 {
+    BEGIN {
+        # Load indicators from decorator hooks
+        ifile = ENVIRON["HAUNT_INDICATORFILE"]
+        while ((getline line < ifile) > 0) {
+            split(line, parts, "\t")
+            indicators[parts[1]] = parts[2]
+        }
+        close(ifile)
+    }
+
+    NF >= 6 {
         winId = $1; tabId = $2; tabName = $3; selected = $4; wd = $5
 
         # Skip the tab running haunt itself
@@ -75,8 +136,8 @@ if [[ "${1:-}" == "--list" ]]; then
         tab[totalTabs, "tabName"] = tabName
         tab[totalTabs, "selected"] = selected
         tab[totalTabs, "wd"] = wd
+        tab[totalTabs, "indicator"] = (tabId in indicators) ? indicators[tabId] " " : ""
 
-        # Collect working dirs per window for common ancestor calculation
         if (!(winId in winDirs)) {
             winDirs[winId] = wd
         } else {
@@ -84,7 +145,6 @@ if [[ "${1:-}" == "--list" ]]; then
         }
     }
 
-    # Find the longest shared path prefix across pipe-separated paths
     function commonAncestor(paths,    arr, n, i, refN, refParts, curParts, common, j, m, ref) {
         n = split(paths, arr, "|")
         if (n == 0) return ""
@@ -106,7 +166,6 @@ if [[ "${1:-}" == "--list" ]]; then
         return ref
     }
 
-    # Strip $HOME prefix for display
     function shortPath(p,    home) {
         home = ENVIRON["HOME"]
         if (index(p, home) == 1) p = substr(p, length(home) + 1)
@@ -116,8 +175,9 @@ if [[ "${1:-}" == "--list" ]]; then
 
     END {
         sep = sprintf("%c", 31)
+        dim = "\033[38;5;245m"
+        reset = "\033[0m"
 
-        # Compute display label per window
         for (i = 1; i <= totalTabs; i++) {
             wId = tab[i, "winId"]
             if (!(wId in winSeen)) {
@@ -129,7 +189,6 @@ if [[ "${1:-}" == "--list" ]]; then
             }
         }
 
-        # Sort windows alphabetically by label (stable tiebreak on id)
         for (i = 2; i <= winCount; i++) {
             key = winList[i]; keyLabel = winLabel[key]; j = i - 1
             while (j > 0 && (winLabel[winList[j]] > keyLabel || (winLabel[winList[j]] == keyLabel && winList[j] > key))) {
@@ -138,10 +197,9 @@ if [[ "${1:-}" == "--list" ]]; then
             winList[j + 1] = key
         }
 
-        # Output each window group
         for (w = 1; w <= winCount; w++) {
             wId = winList[w]
-            printf "\033[38;5;245m\xf0\x9f\x96\xa5  %s\033[0m%s_header_%s_header_\n", winLabel[wId], sep, sep
+            printf "%s\xf0\x9f\x96\xa5  %s%s%s_header_%s_header_\n", dim, winLabel[wId], reset, sep, sep
             for (pass = 1; pass <= 2; pass++) {
                 for (i = 1; i <= totalTabs; i++) {
                     if (tab[i, "winId"] != wId) continue
@@ -149,9 +207,9 @@ if [[ "${1:-}" == "--list" ]]; then
                     if (pass == 1 && !isActive) continue
                     if (pass == 2 && isActive) continue
                     if (isActive)
-                        printf "   \xe2\x96\xb8 %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
+                        printf "   \xe2\x96\xb8 %s%s%s%s%s%s\n", tab[i, "indicator"], tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
                     else
-                        printf "     %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
+                        printf "     %s%s%s%s%s%s\n", tab[i, "indicator"], tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
                 }
             }
         }
@@ -162,10 +220,16 @@ fi
 # ─── Internal: focus a tab (called by fzf on selection) ──────────────────────
 
 if [[ "${1:-}" == "--focus" ]]; then
+    win_id="$2"
+    tab_id="$3"
+
+    # Notify hooks
+    run_hooks "on-focus" "$tab_id"
+
     osascript -e "
     tell application \"Ghostty\"
-        set w to (first window whose id is \"${2}\")
-        set t to (first tab of w whose id is \"${3}\")
+        set w to (first window whose id is \"${win_id}\")
+        set t to (first tab of w whose id is \"${tab_id}\")
         select tab t
         activate window w
     end tell"
@@ -198,6 +262,7 @@ if ! command -v fzf &>/dev/null; then
     echo "haunt: fzf is required but not found (brew install fzf)" >&2
     exit 1
 fi
+
 # ─── Launch ───────────────────────────────────────────────────────────────────
 
 # Detect own tab so we can exclude it from the list
@@ -214,6 +279,11 @@ if [[ -z "$own_tab_id" ]]; then
     exit 1
 fi
 
+export HAUNT_INDICATORFILE="${TMPDIR:-/tmp}haunt-indicators"
+
+# Initialize hooks
+run_hooks "on-start"
+
 # Write lockfile so --summon can find us
 printf '%s\t%s' "$own_win_id" "$own_tab_id" > "$LOCKFILE"
 
@@ -226,7 +296,8 @@ port=$((10000 + RANDOM % 50000))
     done
 ) &
 refresher_pid=$!
-trap "rm -f '$LOCKFILE'; kill $refresher_pid 2>/dev/null" EXIT
+# shellcheck disable=SC2064
+trap "run_hooks on-stop; rm -f '$LOCKFILE' '$HAUNT_INDICATORFILE'; kill $refresher_pid 2>/dev/null" EXIT
 
 # Launch fzf — stays open for repeated selection, Escape to quit
 "$SELF" --list | fzf \
@@ -235,7 +306,6 @@ trap "rm -f '$LOCKFILE'; kill $refresher_pid 2>/dev/null" EXIT
     --no-info \
     --layout=reverse \
     --prompt="haunt> " \
-    --header="▸ = active  |  Esc to quit" \
     --delimiter=$'\x1f' \
     --with-nth=1 \
     --listen="$port" \

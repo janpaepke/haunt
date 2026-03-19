@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# haunt hook: reset Claude status state on haunt startup
+: > "${TMPDIR:-/tmp}haunt-claude-states"
+: > "${TMPDIR:-/tmp}haunt-claude-attention"

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# haunt hook: clear Claude Code attention on tab focus
+# Args: <tab_id>
+
+ATTENTIONFILE="${TMPDIR:-/tmp}haunt-claude-attention"
+[[ -f "$ATTENTIONFILE" ]] || exit 0
+
+grep -v "^${1}$" "$ATTENTIONFILE" > "${ATTENTIONFILE}.tmp" 2>/dev/null || true
+mv "${ATTENTIONFILE}.tmp" "$ATTENTIONFILE"
+
+# Also update state so next refresh doesn't re-trigger
+STATEFILE="${TMPDIR:-/tmp}haunt-claude-states"
+[[ -f "$STATEFILE" ]] || exit 0
+sed -i '' "s/^${1}	working$/${1}	idle/" "$STATEFILE" 2>/dev/null || true
