@@ -23,7 +23,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 SELF="$(realpath "$0")"
 REFRESH_INTERVAL=2
 LOCKFILE="${TMPDIR:-/tmp}haunt.lock"
@@ -329,7 +329,7 @@ port=$((10000 + RANDOM % 50000))
 ) &
 refresher_pid=$!
 # shellcheck disable=SC2064
-trap "run_hooks on-stop; rm -f '$LOCKFILE' '$HAUNT_INDICATORFILE'; kill $refresher_pid 2>/dev/null" EXIT
+trap "run_hooks on-stop; rm -f '$LOCKFILE' '$HAUNT_INDICATORFILE'; kill $refresher_pid 2>/dev/null; wait $refresher_pid 2>/dev/null" EXIT
 
 # Launch fzf — stays open for repeated selection, Escape to quit
 "$SELF" --list | fzf \
@@ -344,4 +344,4 @@ trap "run_hooks on-stop; rm -f '$LOCKFILE' '$HAUNT_INDICATORFILE'; kill $refresh
     --bind "enter:execute-silent($SELF --focus {2} {3})+reload($SELF --list)" \
 || true
 
-kill "$refresher_pid" 2>/dev/null
+kill "$refresher_pid" 2>/dev/null; wait "$refresher_pid" 2>/dev/null
