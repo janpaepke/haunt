@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+# haunt — A tab switcher and session dashboard for Ghostty
+#
+# Uses Ghostty's native AppleScript API (works across all macOS Spaces).
+# Auto-refreshes tab list every 2 seconds.
+# Requires: macOS, Ghostty, fzf >= 0.48
+set -euo pipefail
+
+SELF="$(realpath "$0")"
+REFRESH_INTERVAL=2
+
+# --- Sub-command: fetch tab list for fzf ---
+if [[ "${1:-}" == "--list" ]]; then
+    # Get raw data: winId \t tabId \t tabName \t selected \t workingDir
+    raw=$(osascript -e '
+    tell application "Ghostty"
+        set sep to ASCII character 31
+        set output to ""
+        set winList to every window
+        repeat with w in winList
+            set winId to id of w
+            set tabList to every tab of w
+            repeat with t in tabList
+                set tabId to id of t
+                set tabName to name of t
+                set isSel to selected of t
+                set wd to working directory of focused terminal of t
+                set output to output & winId & sep & tabId & sep & tabName & sep & isSel & sep & wd & linefeed
+            end repeat
+        end repeat
+        return output
+    end tell')
+
+    # Process: group by working directory ancestor, sort groups alphabetically, active tabs first
+    echo "$raw" | awk -F$'\x1f' '
+    NF >= 5 {
+        winId = $1
+        tabId = $2
+        tabName = $3
+        selected = $4
+        wd = $5
+
+        # Skip our own tab
+        if (tabId == ENVIRON["HAUNT_SELF"]) next
+
+        # Store tab data globally
+        totalTabs++
+        tab[totalTabs, "winId"] = winId
+        tab[totalTabs, "tabId"] = tabId
+        tab[totalTabs, "tabName"] = tabName
+        tab[totalTabs, "selected"] = selected
+        tab[totalTabs, "wd"] = wd
+
+        # Track which window this tab belongs to (for per-window ancestor calc)
+        if (!(winId in winDirs)) {
+            winDirs[winId] = wd
+        } else {
+            winDirs[winId] = winDirs[winId] "|" wd
+        }
+    }
+
+    function commonAncestor(paths,    arr, n, i, refN, refParts, curParts, common, j, m, ref) {
+        n = split(paths, arr, "|")
+        if (n == 0) return ""
+        if (n == 1) return arr[1]
+        refN = split(arr[1], refParts, "/")
+        common = refN
+        for (i = 2; i <= n; i++) {
+            m = split(arr[i], curParts, "/")
+            if (m < common) common = m
+            for (j = 1; j <= common; j++) {
+                if (refParts[j] != curParts[j]) {
+                    common = j - 1
+                    break
+                }
+            }
+        }
+        ref = ""
+        for (j = 1; j <= common; j++) {
+            if (j > 1) ref = ref "/"
+            ref = ref refParts[j]
+        }
+        return ref
+    }
+
+    function shortPath(p,    home) {
+        home = ENVIRON["HOME"]
+        if (index(p, home) == 1) {
+            p = substr(p, length(home) + 1)
+        }
+        sub(/^\/dev\//, "", p)
+        sub(/^\//, "", p)
+        return p
+    }
+
+    END {
+        sep = sprintf("%c", 31)
+
+        # Compute label per window and build window list (preserving order)
+        for (i = 1; i <= totalTabs; i++) {
+            wId = tab[i, "winId"]
+            if (!(wId in winSeen)) {
+                winSeen[wId] = 1
+                winCount++
+                winList[winCount] = wId
+                winLabel[wId] = shortPath(commonAncestor(winDirs[wId]))
+                if (winLabel[wId] == "") winLabel[wId] = "~"
+            }
+        }
+
+        # Sort windows alphabetically by label, then by winId for stable tiebreak
+        for (i = 2; i <= winCount; i++) {
+            key = winList[i]
+            keyLabel = winLabel[key]
+            j = i - 1
+            while (j > 0 && (winLabel[winList[j]] > keyLabel || (winLabel[winList[j]] == keyLabel && winList[j] > key))) {
+                winList[j + 1] = winList[j]
+                j--
+            }
+            winList[j + 1] = key
+        }
+
+        # Print each window group
+        for (w = 1; w <= winCount; w++) {
+            wId = winList[w]
+
+            # Print group header (muted gray)
+            printf "\033[38;5;245m\xf0\x9f\x96\xa5  %s\033[0m%s_header_%s_header_\n", winLabel[wId], sep, sep
+
+            # Active tabs first, then inactive
+            for (pass = 1; pass <= 2; pass++) {
+                for (i = 1; i <= totalTabs; i++) {
+                    if (tab[i, "winId"] != wId) continue
+                    isActive = (tab[i, "selected"] == "true")
+                    if (pass == 1 && !isActive) continue
+                    if (pass == 2 && isActive) continue
+
+                    if (isActive) {
+                        printf "   \xe2\x96\xb8 %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
+                    } else {
+                        printf "     %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
+                    }
+                }
+            }
+        }
+    }'
+    exit 0
+fi
+
+# --- Sub-command: focus a tab ---
+if [[ "${1:-}" == "--focus" ]]; then
+    win_id="$2"
+    tab_id="$3"
+    osascript -e "
+    tell application \"Ghostty\"
+        set w to (first window whose id is \"${win_id}\")
+        set t to (first tab of w whose id is \"${tab_id}\")
+        select tab t
+        activate window w
+    end tell"
+    exit 0
+fi
+
+# --- Background refresher ---
+start_refresher() {
+    local port="$1"
+    while true; do
+        sleep "$REFRESH_INTERVAL"
+        curl -s -XPOST "localhost:${port}" -d "reload($SELF --list)" >/dev/null 2>&1 || break
+    done
+}
+
+# --- Sub-command: bring to front ---
+LOCKFILE="/tmp/haunt.lock"
+if [[ "${1:-}" == "--summon" ]]; then
+    if [[ -f "$LOCKFILE" ]]; then
+        IFS=$'\t' read -r win_id tab_id < "$LOCKFILE" || true
+        osascript -e "
+        tell application \"Ghostty\"
+            set w to (first window whose id is \"${win_id}\")
+            set t to (first tab of w whose id is \"${tab_id}\")
+            select tab t
+            activate window w
+        end tell" 2>/dev/null
+    fi
+    exit 0
+fi
+
+# --- Detect own window/tab ID at launch ---
+export HAUNT_SELF
+read -r own_win_id own_tab_id <<< "$(osascript -e '
+tell application "Ghostty"
+    set w to front window
+    return (id of w) & " " & (id of selected tab of w)
+end tell' 2>/dev/null || echo "")"
+HAUNT_SELF="$own_tab_id"
+
+# Write lockfile for --summon
+printf '%s\t%s' "$own_win_id" "$own_tab_id" > "$LOCKFILE"
+
+# --- Main ---
+
+port=$((10000 + RANDOM % 50000))
+
+start_refresher "$port" &
+refresher_pid=$!
+trap "rm -f '$LOCKFILE'; kill $refresher_pid 2>/dev/null" EXIT
+
+# Single fzf instance: Enter executes focus + reload in-place (no flicker)
+"$SELF" --list | fzf \
+    --ansi \
+    --no-sort \
+    --no-info \
+    --layout=reverse \
+    --prompt="haunt> " \
+    --header="▸ = active  |  Esc to quit" \
+    --delimiter=$'\x1f' \
+    --with-nth=1 \
+    --listen="$port" \
+    --bind "enter:execute-silent($SELF --focus {2} {3})+reload($SELF --list)" \
+|| true
+
+kill "$refresher_pid" 2>/dev/null
