@@ -198,11 +198,6 @@ if ! command -v fzf &>/dev/null; then
     echo "haunt: fzf is required but not found (brew install fzf)" >&2
     exit 1
 fi
-if ! pgrep -q Ghostty; then
-    echo "haunt: Ghostty must be running" >&2
-    exit 1
-fi
-
 # ─── Launch ───────────────────────────────────────────────────────────────────
 
 # Detect own tab so we can exclude it from the list
@@ -213,6 +208,11 @@ tell application "Ghostty"
     return (id of w) & " " & (id of selected tab of w)
 end tell' 2>/dev/null || echo "")"
 HAUNT_SELF="$own_tab_id"
+
+if [[ -z "$own_tab_id" ]]; then
+    echo "haunt: Ghostty must be running" >&2
+    exit 1
+fi
 
 # Write lockfile so --summon can find us
 printf '%s\t%s' "$own_win_id" "$own_tab_id" > "$LOCKFILE"

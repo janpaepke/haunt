@@ -84,7 +84,7 @@ haunt queries Ghostty's AppleScript API to enumerate all windows and tabs with t
 - **Ghostty only** — the AppleScript interface is specific to Ghostty. Supporting other terminals (iTerm2, WezTerm, etc.) would need separate backends.
 - **No session persistence** — haunt shows live tabs but doesn't save/restore sessions across Ghostty restarts.
 
-PRs welcome — see the issues for planned work.
+PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the issues for planned work.
 
 ## License
 
