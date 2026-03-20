@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# haunt hook: list tab IDs that need attention
+# Output: one tab ID per line
+ATTENTIONFILE="${TMPDIR:-/tmp}haunt-claude-attention"
+[[ -s "$ATTENTIONFILE" ]] && cat "$ATTENTIONFILE"

@@ -16,7 +16,7 @@ install.sh         # installer (symlinks locally, downloads tarball remotely)
 test.sh            # integration tests
 hooks/             # bundled hook plugins
   claude-status/   # Claude Code status indicators
-    decorate       # adds ⏳/⚡ indicators based on terminal name
+    decorate       # adds working/attention indicators based on terminal name
     on-focus       # clears attention when a tab is focused
     on-start       # resets state files on haunt startup
     on-stop        # cleans up state files on haunt exit
@@ -29,6 +29,7 @@ Hooks are the extension mechanism for haunt. Each hook is a directory under `hoo
 | Hook | When | Input | Purpose |
 |------|------|-------|---------|
 | `decorate` | Each refresh | `tabId\ttermName\tfocused` on stdin | Output `tabId\tindicator` lines to add indicators |
+| `attention` | `--next` command | (none) | Output tab IDs that need attention (one per line) |
 | `on-focus` | Tab selected | `<tab_id>` as arg | React to tab focus (e.g. clear notifications) |
 | `on-start` | haunt launches | (none) | Initialize state |
 | `on-stop` | haunt exits | (none) | Clean up state |

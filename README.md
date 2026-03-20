@@ -17,7 +17,7 @@ haunt gives you a single, persistent overview of everything that's open, and let
 - **Cross-Space switching** — jump to any tab in any window on any Space
 - **Grouped by project** — tabs are organized by their common working directory
 - **Active tab indicators** — see which tabs are selected at a glance
-- **Claude Code status** — shows ⏳ when Claude is working, ⚡ when it needs your input (via bundled hook)
+- **Claude Code status** — shows ◌ when Claude is working, highlights the line when it needs your input (via bundled hook)
 - **Auto-refresh** — the list updates every 2 seconds
 - **Stays open** — switch between tabs without relaunching
 - **Summon mode** — bring haunt to focus from a hotkey
@@ -50,19 +50,25 @@ rm -rf ~/.local/share/haunt ~/.local/bin/haunt
 ```bash
 haunt              # Launch the dashboard
 haunt --summon     # Focus an already-running instance
+haunt --next       # Jump to the next tab that needs attention
 haunt --version    # Show version
 haunt --help       # Show help
 ```
 
-### Global hotkey
+Inside haunt, use **Page Down / Page Up** to jump between window groups.
 
-For quick access, bind `haunt --summon` to a system-wide keyboard shortcut. Pick whichever method you already use:
+### Global hotkeys
+
+Bind these to system-wide keyboard shortcuts for quick access:
+
+- `haunt --summon` — open the dashboard
+- `haunt --next` — jump straight to the next tab that needs your input
 
 **Raycast** (free)
-Create a Script Command that runs `haunt --summon` and assign a hotkey.
+Create Script Commands for each and assign hotkeys.
 
 **Alfred** (requires Powerpack)
-Create a workflow: Hotkey trigger → Run Script → `haunt --summon`.
+Create a workflow per command: Hotkey trigger → Run Script.
 
 **macOS Shortcuts**
 Create a shortcut with a "Run Shell Script" action (`haunt --summon`), then assign a keyboard shortcut in System Settings → Keyboard → Keyboard Shortcuts → App Shortcuts.

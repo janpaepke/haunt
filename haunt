@@ -17,13 +17,14 @@
 # Usage:
 #   haunt              Launch the interactive tab dashboard
 #   haunt --summon     Focus an already-running haunt instance
+#   haunt --next       Jump to the next tab that needs attention
 #   haunt --help       Show this help
 #   haunt --version    Show version
 #
 
 set -euo pipefail
 
-VERSION="0.2.2"
+VERSION="0.3.0"
 SELF="$(realpath "$0")"
 REFRESH_INTERVAL=2
 LOCKFILE="${TMPDIR:-/tmp}haunt.lock"
@@ -166,7 +167,7 @@ if [[ "${1:-}" == "--list" ]]; then
         tab[totalTabs, "tabName"] = tabName
         tab[totalTabs, "selected"] = selected
         tab[totalTabs, "wd"] = wd
-        tab[totalTabs, "indicator"] = (tabId in indicators) ? indicators[tabId] " " : ""
+        tab[totalTabs, "indicator"] = (tabId in indicators) ? indicators[tabId] : ""
 
         if (!(winId in winDirs)) {
             winDirs[winId] = wd
@@ -232,20 +233,67 @@ if [[ "${1:-}" == "--list" ]]; then
         for (w = 1; w <= winCount; w++) {
             wId = winList[w]
             printf "%s\xf0\x9f\x96\xa5  %s%s%s_header_%s_header_\n", dim, winLabel[wId], reset, sep, sep
-            for (pass = 1; pass <= 2; pass++) {
-                for (i = 1; i <= totalTabs; i++) {
-                    if (tab[i, "winId"] != wId) continue
-                    isActive = (tab[i, "selected"] == "true")
-                    if (pass == 1 && !isActive) continue
-                    if (pass == 2 && isActive) continue
-                    if (isActive)
-                        printf "   \xe2\x96\xb8 %s%s%s%s%s%s\n", tab[i, "indicator"], tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
-                    else
-                        printf "     %s%s%s%s%s%s\n", tab[i, "indicator"], tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
-                }
+            for (i = 1; i <= totalTabs; i++) {
+                if (tab[i, "winId"] != wId) continue
+                ind = tab[i, "indicator"]
+                if (ind != "")
+                    # Hook indicator replaces the active marker; reset at end of line
+                    printf "   %s%s%s%s%s%s%s\n", ind, tab[i, "tabName"], reset, sep, tab[i, "winId"], sep, tab[i, "tabId"]
+                else if (tab[i, "selected"] == "true")
+                    printf "   \xe2\x96\xb8 %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
+                else
+                    printf "     %s%s%s%s%s\n", tab[i, "tabName"], sep, tab[i, "winId"], sep, tab[i, "tabId"]
             }
         }
-    }'
+    }' | {
+        # Save header line positions for group jumping, pass output through
+        n=0
+        posfile="${HAUNT_INDICATORFILE:-${TMPDIR:-/tmp}haunt-indicators}.pos"
+        : > "$posfile"
+        while IFS= read -r line; do
+            n=$((n + 1))
+            echo "$line"
+            case "$line" in *_header_*) echo "$n" >> "$posfile" ;; esac
+        done
+    }
+    exit 0
+fi
+
+# ─── Internal: jump to next/prev group (called by fzf transform) ──────────────
+
+if [[ "${1:-}" == "--jump-group" ]]; then
+    direction="$2"
+    current="$3"
+    posfile="${HAUNT_INDICATORFILE:-${TMPDIR:-/tmp}haunt-indicators}.pos"
+
+    [[ -f "$posfile" ]] || { echo "pos($current)"; exit 0; }
+
+    if [[ "$direction" == "down" ]]; then
+        # First header after current position, +1 to land on first tab
+        while IFS= read -r h; do
+            if [[ "$h" -gt "$current" ]]; then
+                echo "pos($((h + 1)))"
+                exit 0
+            fi
+        done < "$posfile"
+    else
+        # Find the header of the previous group.
+        # First, find which header belongs to the current group (last header before current pos).
+        # Then find the header before that one.
+        prev_prev=""
+        prev=""
+        while IFS= read -r h; do
+            [[ "$h" -ge "$current" ]] && break
+            prev_prev="$prev"
+            prev="$h"
+        done < "$posfile"
+        target="${prev_prev:-$prev}"
+        if [[ -n "$target" ]]; then
+            echo "pos($((target + 1)))"
+            exit 0
+        fi
+    fi
+    echo "pos($current)"
     exit 0
 fi
 
@@ -282,6 +330,54 @@ if [[ "${1:-}" == "--summon" || "${1:-}" == "summon" ]]; then
             activate window w
         end tell" 2>/dev/null
     fi
+    exit 0
+fi
+
+# ─── Next: jump to the next tab that needs attention ──────────────────────────
+
+if [[ "${1:-}" == "--next" || "${1:-}" == "next" ]]; then
+    # Collect attention tab IDs from all hooks
+    tab_id=""
+    for name in $HOOKS; do
+        local_script="${SCRIPTDIR}/hooks/${name}/attention"
+        if [[ -x "$local_script" ]]; then
+            tab_id=$("$local_script" | head -1)
+            [[ -n "$tab_id" ]] && break
+        fi
+    done
+
+    if [[ -z "$tab_id" ]]; then
+        echo "haunt: no tabs need attention" >&2
+        exit 0
+    fi
+
+    # Look up the window ID for this tab
+    win_id=$(osascript -e "
+    tell application \"Ghostty\"
+        repeat with w in every window
+            repeat with t in every tab of w
+                if id of t is \"${tab_id}\" then return id of w
+            end repeat
+        end repeat
+        return \"\"
+    end tell" 2>/dev/null)
+
+    if [[ -z "$win_id" ]]; then
+        echo "haunt: attention tab no longer exists" >&2
+        exit 1
+    fi
+
+    # Clear attention for this tab via hooks, then focus it
+    run_hooks "on-focus" "$tab_id"
+
+    osascript -e "
+    tell application \"Ghostty\"
+        activate
+        set w to (first window whose id is \"${win_id}\")
+        set t to (first tab of w whose id is \"${tab_id}\")
+        select tab t
+        activate window w
+    end tell" 2>/dev/null
     exit 0
 fi
 
@@ -343,6 +439,8 @@ trap "run_hooks on-stop; rm -f '$LOCKFILE' '$HAUNT_INDICATORFILE'; kill $refresh
     --with-nth=1 \
     --listen="$port" \
     --bind "enter:execute-silent($SELF --focus {2} {3})+reload($SELF --list)" \
+    --bind "page-down:transform($SELF --jump-group down \$FZF_POS)" \
+    --bind "page-up:transform($SELF --jump-group up \$FZF_POS)" \
 || true
 
 kill "$refresher_pid" 2>/dev/null; wait "$refresher_pid" 2>/dev/null
