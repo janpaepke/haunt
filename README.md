@@ -17,7 +17,7 @@ haunt gives you a single, persistent overview of everything that's open, and let
 - **Cross-Space switching** — jump to any tab in any window on any Space
 - **Grouped by project** — tabs are organized by their common working directory
 - **Active tab indicators** — see which tabs are selected at a glance
-- **Claude Code status** — shows ◌ when Claude is working, highlights the line when it needs your input (via bundled hook)
+- **Claude Code status** — shows ◌ when Claude is working, ✳ when it needs your input (via bundled hook)
 - **Auto-refresh** — the list updates every 2 seconds
 - **Stays open** — switch between tabs without relaunching
 - **Summon mode** — bring haunt to focus from a hotkey

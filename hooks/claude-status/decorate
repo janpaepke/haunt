@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # haunt hook: Claude Code status indicators
-# Detects working/idle state from terminal name and tracks transitions.
+# Detects working/idle state from Ghostty tab title prefixes and tracks transitions.
 #
-# Input (stdin):  tabId \t termName \t selected  (one per line)
+# Input (stdin):  tabId \t tabName \t termName \t focused  (one per line)
 # Output (stdout): tabId \t indicator  (only for tabs that need one)
 #
+# Detection: ✳ prefix (U+2733) = idle, braille spinner ⠂/⠐ (U+2800–U+28FF) = working
+# Checks termName first (always updated by Claude), falls back to tabName.
+#
 # ◌ (dim) = Claude is working
-# ◆ (yellow, full line) = Claude finished, needs input — cleared when tab is viewed
+# ✳ (yellow, full line) = Claude finished, needs input — cleared when tab is viewed
 
 set -euo pipefail
 
@@ -15,7 +18,7 @@ ATTENTIONFILE="${TMPDIR:-/tmp}haunt-claude-attention"
 
 touch "$STATEFILE" "$ATTENTIONFILE"
 
-awk -F'\t' '
+LC_ALL=C awk -F'\t' '
 BEGIN {
     statefile = "'"$STATEFILE"'"
     attentionfile = "'"$ATTENTIONFILE"'"
@@ -32,16 +35,24 @@ BEGIN {
     close(attentionfile)
 }
 
+function detectClaude(name,    b2) {
+    if (index(name, "\xe2\x9c\xb3") == 1) return "idle"
+    b2 = substr(name, 1, 2)
+    if (b2 >= "\xe2\xa0" && b2 <= "\xe2\xa3") return "working"
+    return ""
+}
+
 {
-    tabId = $1; termName = $2; focused = $3
+    tabId = $1; tabName = $2; termName = $3; focused = $4
     isWorking = 0; isIdle = 0
 
-    if (index(termName, "Claude Code") > 0) {
-        if (index(termName, "\xe2\x9c\xb3") == 1)
-            isIdle = 1
-        else
-            isWorking = 1
-    } else next
+    # termName is always updated by Claude; tabName is fallback (user may override tab)
+    state = detectClaude(termName)
+    if (state == "") state = detectClaude(tabName)
+    if (state == "") next
+
+    if (state == "idle") isIdle = 1
+    else isWorking = 1
 
     # Track state transitions — always flash on working→idle
     if (prev[tabId] == "working" && isIdle) attn[tabId] = 1
@@ -59,7 +70,7 @@ BEGIN {
     if (tabId in attn)
         # No reset — color bleeds into tab name for full-line highlight.
         # haunt adds reset at end of line.
-        printf "%s\t%s\xe2\x97\x86 \n", tabId, yellow
+        printf "%s\t%s\xe2\x9c\xb3 \n", tabId, yellow
     else if (isWorking)
         printf "%s\t%s\xe2\x97\x8c%s \n", tabId, dim, reset
 }

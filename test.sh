@@ -62,30 +62,49 @@ fi
 echo "Claude status hook:"
 decorate="$(dirname "$HAUNT")/hooks/claude-status/decorate"
 
-# Working state
-result=$(printf 'tab-001\t⠐ Claude Code\tfalse\n' | "$decorate" 2>/dev/null)
+# Input format: tabId \t tabName \t termName \t focused
+rm -f "${TMPDIR:-/tmp}haunt-claude-states" "${TMPDIR:-/tmp}haunt-claude-attention"
+
+# Working state (detected via termName)
+result=$(printf 'tab-001\t⠐ My Project\t⠐ My Project\tfalse\n' | "$decorate" 2>/dev/null)
 assert "detects working state" "echo '$result' | grep -q 'tab-001'"
+
+# Working state with alternate spinner char
+rm -f "${TMPDIR:-/tmp}haunt-claude-states" "${TMPDIR:-/tmp}haunt-claude-attention"
+result=$(printf 'tab-001b\t⠂ My Project\t⠂ My Project\tfalse\n' | "$decorate" 2>/dev/null)
+assert "detects working state (alternate braille char)" "echo '$result' | grep -q 'tab-001b'"
 
 # Idle state (no previous = no attention)
 rm -f "${TMPDIR:-/tmp}haunt-claude-states" "${TMPDIR:-/tmp}haunt-claude-attention"
-result=$(printf 'tab-002\t✳ Claude Code\tfalse\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-002\t✳ Claude Code\t✳ Claude Code\tfalse\n' | "$decorate" 2>/dev/null)
 assert "idle with no previous state = no indicator" "[[ -z '$result' ]]"
 
 # Working→idle transition (background tab)
 printf 'tab-003\tworking\n' > "${TMPDIR:-/tmp}haunt-claude-states"
 : > "${TMPDIR:-/tmp}haunt-claude-attention"
-result=$(printf 'tab-003\t✳ Claude Code\tfalse\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-003\t✳ My Project\t✳ My Project\tfalse\n' | "$decorate" 2>/dev/null)
 assert "working→idle transition triggers attention" "echo '$result' | grep -q 'tab-003'"
 
 # Working→idle transition (focused tab = no attention)
 printf 'tab-005\tworking\n' > "${TMPDIR:-/tmp}haunt-claude-states"
 : > "${TMPDIR:-/tmp}haunt-claude-attention"
-result=$(printf 'tab-005\t✳ Claude Code\ttrue\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-005\t✳ Claude Code\t✳ Claude Code\ttrue\n' | "$decorate" 2>/dev/null)
 assert "working→idle on focused tab = no attention" "[[ -z \"\$result\" ]]"
+
+# Fallback: tabName has no prefix, termName has prefix (user renamed tab)
+rm -f "${TMPDIR:-/tmp}haunt-claude-states" "${TMPDIR:-/tmp}haunt-claude-attention"
+result=$(printf 'tab-006\tMy Custom Title\t⠐ My Project\tfalse\n' | "$decorate" 2>/dev/null)
+assert "fallback to termName when tabName has no prefix" "echo '$result' | grep -q 'tab-006'"
+
+# Fallback: termName idle after user renamed tab
+printf 'tab-007\tworking\n' > "${TMPDIR:-/tmp}haunt-claude-states"
+: > "${TMPDIR:-/tmp}haunt-claude-attention"
+result=$(printf 'tab-007\tMy Custom Title\t✳ My Project\tfalse\n' | "$decorate" 2>/dev/null)
+assert "fallback termName idle triggers attention" "echo '$result' | grep -q 'tab-007'"
 
 # Non-Claude tab ignored
 rm -f "${TMPDIR:-/tmp}haunt-claude-states" "${TMPDIR:-/tmp}haunt-claude-attention"
-result=$(printf 'tab-004\t~/my-project\tfalse\n' | "$decorate" 2>/dev/null)
+result=$(printf 'tab-004\t~/my-project\t~/my-project\tfalse\n' | "$decorate" 2>/dev/null)
 assert "non-Claude tab produces no indicator" "[[ -z '$result' ]]"
 
 # Cleanup

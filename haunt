@@ -71,7 +71,7 @@ run_hooks() {
 }
 
 # Collect decorator output from all enabled hooks into a single indicators file.
-# Each decorator receives tab data on stdin (tsv: tabId \t termName \t focused)
+# Each decorator receives tab data on stdin (tsv: tabId \t tabName \t termName \t focused)
 # and outputs lines of: tabId \t indicator (with ANSI color codes)
 run_decorators() {
     local tab_data="$1"
@@ -109,7 +109,7 @@ if [[ "${1:-}" == "--list" ]]; then
         return output
     end tell')
 
-    # Build tab data for decorators: tabId \t termName \t focused
+    # Build tab data for decorators: tabId \t tabName \t termName \t focused
     # "focused" = the tab the user is actually viewing right now.
     # Uses System Events AXMain attribute to find the keyboard-focused window
     # (Ghostty's own "front window" is unreliable — it reflects the last
@@ -138,14 +138,14 @@ if [[ "${1:-}" == "--list" ]]; then
     # user-named tabs; Claude's default names (✳ Claude Code) are all idle anyway.
     tab_data=$(echo "$raw" | awk -F$'\x1f' -v fwn="$focused_win_name" 'NF >= 6 {
         focused = (fwn != "" && $4 == "true" && $3 == fwn) ? "true" : "false"
-        print $2 "\t" $6 "\t" focused
+        print $2 "\t" $3 "\t" $6 "\t" focused
     }')
     run_decorators "$tab_data" "$indicatorfile"
 
     # Format tab data for fzf. Output fields (separated by \x1f):
     #   1: display text (visible)  2: winId (hidden)  3: tabId (hidden)
     # Indicators from hooks are prepended to the display text.
-    echo "$raw" | awk -F$'\x1f' '
+    echo "$raw" | LC_ALL=C awk -F$'\x1f' '
     BEGIN {
         ifile = ENVIRON["HAUNT_INDICATORFILE"]
         while ((getline line < ifile) > 0) {
@@ -160,6 +160,11 @@ if [[ "${1:-}" == "--list" ]]; then
 
         # Skip the tab running haunt itself
         if (tabId == ENVIRON["HAUNT_SELF"]) next
+
+        # Strip Claude Code status prefix (✳ or braille spinner + space) from tab name
+        b2 = substr(tabName, 1, 2)
+        if ((substr(tabName, 1, 3) == "\xe2\x9c\xb3" || (b2 >= "\xe2\xa0" && b2 <= "\xe2\xa3")) && substr(tabName, 4, 1) == " ")
+            tabName = substr(tabName, 5)
 
         totalTabs++
         tab[totalTabs, "winId"] = winId
