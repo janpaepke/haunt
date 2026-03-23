@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-VERSION="0.3.0"
+VERSION="0.3.1"
 SELF="$(realpath "$0")"
 REFRESH_INTERVAL=2
 LOCKFILE="${TMPDIR:-/tmp}haunt.lock"
