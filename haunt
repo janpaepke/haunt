@@ -443,7 +443,7 @@ trap "run_hooks on-stop; rm -f '$LOCKFILE' '$HAUNT_INDICATORFILE'; kill $refresh
     --delimiter=$'\x1f' \
     --with-nth=1 \
     --listen="$port" \
-    --bind "enter:execute-silent($SELF --focus {2} {3})+reload($SELF --list)" \
+    --bind "enter:execute-silent($SELF --focus {2} {3})+clear-query+reload($SELF --list)" \
     --bind "page-down:transform($SELF --jump-group down \$FZF_POS)" \
     --bind "page-up:transform($SELF --jump-group up \$FZF_POS)" \
 || true
